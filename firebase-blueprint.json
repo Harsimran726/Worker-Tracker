@@ -1,0 +1,79 @@
+{
+  "entities": {
+    "Worker": {
+      "title": "Worker",
+      "description": "Details of a carpentry worker",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Full name of the worker" },
+        "phone": { "type": "string", "description": "Contact phone number" },
+        "dailySalary": { "type": "number", "description": "Standard daily pay rate" },
+        "workingHours": { "type": "number", "description": "Standard working hours per day" },
+        "status": { "type": "string", "enum": ["active", "inactive"], "description": "Employment status" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the worker was added" },
+        "ownerId": { "type": "string", "description": "UID of the user who manages this worker" }
+      },
+      "required": ["name", "dailySalary", "ownerId"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Daily attendance record for a worker",
+      "type": "object",
+      "properties": {
+        "workerId": { "type": "string", "description": "ID of the worker" },
+        "date": { "type": "string", "format": "date", "description": "Date of attendance (YYYY-MM-DD)" },
+        "status": { "type": "string", "enum": ["present", "absent", "half-day"], "description": "Attendance status" },
+        "hoursWorked": { "type": "number", "description": "Actual hours worked" },
+        "notes": { "type": "string", "description": "Optional notes or reason for absence" },
+        "ownerId": { "type": "string", "description": "UID of the user who recorded this" }
+      },
+      "required": ["workerId", "date", "status", "ownerId"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Record of payment made to a worker (advance or salary)",
+      "type": "object",
+      "properties": {
+        "workerId": { "type": "string", "description": "ID of the worker" },
+        "date": { "type": "string", "format": "date-time", "description": "When the payment was made" },
+        "amount": { "type": "number", "description": "Amount paid" },
+        "type": { "type": "string", "enum": ["advance", "salary_payout", "deduction"], "description": "Type of payment" },
+        "notes": { "type": "string", "description": "Optional notes" },
+        "ownerId": { "type": "string", "description": "UID of the user who recorded this" }
+      },
+      "required": ["workerId", "date", "amount", "type", "ownerId"]
+    },
+    "ClientCollection": {
+      "title": "Client Collection",
+      "description": "Record of amount collected from a client",
+      "type": "object",
+      "properties": {
+        "clientName": { "type": "string", "description": "Name of the client" },
+        "amount": { "type": "number", "description": "Amount collected" },
+        "date": { "type": "string", "format": "date-time", "description": "When the amount was collected" },
+        "paymentMethod": { "type": "string", "enum": ["cash", "online"], "description": "Method of collection" },
+        "notes": { "type": "string", "description": "Optional notes" },
+        "ownerId": { "type": "string", "description": "UID of the user who recorded this" }
+      },
+      "required": ["clientName", "amount", "date", "paymentMethod", "ownerId"]
+    }
+  },
+  "firestore": {
+    "workers": {
+      "schema": "Worker",
+      "description": "Collection of workers managed by users"
+    },
+    "attendance": {
+      "schema": "Attendance",
+      "description": "Historical attendance records"
+    },
+    "payments": {
+      "schema": "Payment",
+      "description": "Historical payment and advance records"
+    },
+    "client_collections": {
+      "schema": "ClientCollection",
+      "description": "Records of amounts collected from clients"
+    }
+  }
+}

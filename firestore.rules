@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Primitives
+    function isSignedIn() { return request.auth != null; }
+    function isEmailVerified() { return request.auth.token.email_verified == true; }
+    function isOwner(data) { return isSignedIn() && data.ownerId == request.auth.uid; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+
+    // Worker Validation
+    function isValidWorker(data) {
+      return data.keys().hasAll(['name', 'dailySalary', 'ownerId'])
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.dailySalary is number && data.dailySalary >= 0
+        && data.ownerId == request.auth.uid
+        && (data.get('phone', '') is string && data.get('phone', '').size() <= 20)
+        && (data.get('status', 'active') in ['active', 'inactive'])
+        && (data.get('workingHours', 8) is number && data.get('workingHours', 8) >= 0);
+    }
+
+    match /workers/{workerId} {
+      allow get: if isOwner(resource.data);
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isEmailVerified() && isValidId(workerId) && isValidWorker(request.resource.data);
+      allow update: if isSignedIn() && isOwner(resource.data) && isValidWorker(request.resource.data)
+        && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'phone', 'dailySalary', 'workingHours', 'status']));
+      allow delete: if isOwner(resource.data);
+    }
+
+    // Attendance Validation
+    function isValidAttendance(data) {
+      return data.keys().hasAll(['workerId', 'date', 'status', 'ownerId'])
+        && data.workerId is string && data.workerId.size() <= 128
+        && data.date is string && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.status in ['present', 'absent', 'half-day']
+        && data.ownerId == request.auth.uid
+        && (data.get('hoursWorked', 0) is number)
+        && (data.get('notes', '') is string && data.get('notes', '').size() <= 500);
+    }
+
+    match /attendance/{atId} {
+      allow get: if isOwner(resource.data);
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isEmailVerified() && isValidId(atId) && isValidAttendance(request.resource.data)
+        && exists(/databases/$(database)/documents/workers/$(request.resource.data.workerId));
+      allow update: if isSignedIn() && isOwner(resource.data) && isValidAttendance(request.resource.data)
+        && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'hoursWorked', 'notes']));
+      allow delete: if isOwner(resource.data);
+    }
+
+    // Payment Validation
+    function isValidPayment(data) {
+      return data.keys().hasAll(['workerId', 'date', 'amount', 'type', 'ownerId'])
+        && data.workerId is string && data.workerId.size() <= 128
+        && data.amount is number && data.amount >= 0
+        && data.type in ['advance', 'salary_payout', 'deduction']
+        && data.ownerId == request.auth.uid
+        && (data.get('notes', '') is string && data.get('notes', '').size() <= 500);
+    }
+
+    match /payments/{paymentId} {
+      allow get: if isOwner(resource.data);
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isEmailVerified() && isValidId(paymentId) && isValidPayment(request.resource.data)
+        && exists(/databases/$(database)/documents/workers/$(request.resource.data.workerId));
+      allow update: if isSignedIn() && isOwner(resource.data) && isValidPayment(request.resource.data)
+        && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['amount', 'type', 'notes', 'date']));
+      allow delete: if isOwner(resource.data);
+    }
+    // Collection Validation
+    function isValidCollection(data) {
+      return data.keys().hasAll(['clientName', 'amount', 'date', 'paymentMethod', 'ownerId'])
+        && data.clientName is string && data.clientName.size() > 0 && data.clientName.size() <= 100
+        && data.amount is number && data.amount >= 0
+        && data.date is string && data.date.size() <= 50
+        && data.paymentMethod in ['cash', 'online']
+        && data.ownerId == request.auth.uid
+        && (data.get('notes', '') is string && data.get('notes', '').size() <= 500);
+    }
+
+    match /client_collections/{colId} {
+      allow get: if isOwner(resource.data);
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isEmailVerified() && isValidId(colId) && isValidCollection(request.resource.data);
+      allow update: if isSignedIn() && isOwner(resource.data) && isValidCollection(request.resource.data)
+        && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['clientName', 'amount', 'date', 'paymentMethod', 'notes']));
+      allow delete: if isOwner(resource.data);
+    }
+  }
+}
