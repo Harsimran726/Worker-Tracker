@@ -24,7 +24,9 @@ import {
   CheckCircle2,
   XCircle,
   Info,
-  Clock as HistoryClockIcon
+  Clock as HistoryClockIcon,
+  Mic,
+  MicOff
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { 
@@ -39,6 +41,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './lib/firebase';
 import { useFirebase } from './hooks/useFirebase';
+import { useSpeechToText } from './hooks/useSpeechToText';
 import { Artisan, AttendanceRecord, Payment, AttendanceStatus, ClientCollection } from './types';
 import { cn, handleFirestoreError, OperationType } from './lib/utils';
 
@@ -129,26 +132,27 @@ export default function App() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto pb-24 px-6 pt-6 scroll-smooth">
+      <main className="flex-1 overflow-y-auto pb-24 px-6 pt-6 scroll-smooth scrollbar-hide">
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' && (
-            <DashboardView workers={workers} attendance={attendance} payments={payments} collections={clientCollections} setActiveTab={setActiveTab} />
+            <DashboardView key="dashboard" workers={workers} attendance={attendance} payments={payments} collections={clientCollections} setActiveTab={setActiveTab} />
           )}
           {activeTab === 'workers' && (
             <WorkersView 
+              key="workers"
               workers={workers} 
               onAddWorker={() => setShowAddWorker(true)}
               onSelectWorker={setSelectedWorkerId}
             />
           )}
           {activeTab === 'attendance' && (
-            <AttendanceView workers={workers} attendance={attendance} user={user} />
+            <AttendanceView key="attendance" workers={workers} attendance={attendance} user={user} />
           )}
           {activeTab === 'reports' && (
-            <ReportsView workers={workers} attendance={attendance} payments={payments} />
+            <ReportsView key="reports" workers={workers} attendance={attendance} payments={payments} />
           )}
           {activeTab === 'collections' && (
-            <CollectionsView collections={clientCollections} onAdd={() => setShowAddCollection(true)} />
+            <CollectionsView key="collections" collections={clientCollections} onAdd={() => setShowAddCollection(true)} />
           )}
         </AnimatePresence>
       </main>
@@ -165,10 +169,11 @@ export default function App() {
       {/* Overlays */}
       <AnimatePresence>
         {showAddWorker && (
-          <AddWorkerModal onClose={() => setShowAddWorker(false)} user={user} />
+          <AddWorkerModal key="add-worker" onClose={() => setShowAddWorker(false)} user={user} />
         )}
         {selectedWorker && (
           <WorkerDetailModal 
+            key="worker-detail"
             worker={selectedWorker} 
             attendance={attendance.filter(a => a.workerId === selectedWorker.id)}
             payments={payments.filter(p => p.workerId === selectedWorker.id)}
@@ -179,23 +184,24 @@ export default function App() {
         )}
         {showAddPayment && selectedWorker && (
           <AddPaymentModal 
+            key="add-payment"
             worker={selectedWorker} 
             onClose={() => setShowAddPayment(false)} 
             user={user} 
           />
         )}
         {showAboutUs && (
-          <AboutUsModal onClose={() => setShowAboutUs(false)} />
+          <AboutUsModal key="about-us" onClose={() => setShowAboutUs(false)} />
         )}
         {showAddCollection && (
-          <AddCollectionModal onClose={() => setShowAddCollection(false)} user={user} />
+          <AddCollectionModal key="add-collection" onClose={() => setShowAddCollection(false)} user={user} />
         )}
       </AnimatePresence>
     </div>
   );
 }
 
-function AboutUsModal({ onClose }: { onClose: () => void }) {
+function AboutUsModal({ onClose }: { onClose: () => void, key?: React.Key }) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-amber-950/40 backdrop-blur-md p-6">
       <motion.div 
@@ -299,7 +305,7 @@ function NavButton({ active, onClick, icon, label }: { active: boolean, onClick:
   );
 }
 
-function DashboardView({ workers, attendance, payments, collections, setActiveTab }: { workers: Artisan[], attendance: AttendanceRecord[], payments: Payment[], collections: ClientCollection[], setActiveTab: any }) {
+function DashboardView({ workers, attendance, payments, collections, setActiveTab }: { workers: Artisan[], attendance: AttendanceRecord[], payments: Payment[], collections: ClientCollection[], setActiveTab: any, key?: React.Key }) {
   const activeWorkers = workers.filter(w => w.status === 'active').length;
   
   const todayStr = format(new Date(), 'yyyy-MM-dd');
@@ -432,7 +438,7 @@ function QuickAction({ icon, label, sub, bgColor, onClick }: { icon: React.React
   );
 }
 
-function CollectionsView({ collections, onAdd }: { collections: ClientCollection[], onAdd: () => void }) {
+function CollectionsView({ collections, onAdd }: { collections: ClientCollection[], onAdd: () => void, key?: React.Key }) {
   const [search, setSearch] = useState('');
   const filtered = collections.filter(c => c.clientName.toLowerCase().includes(search.toLowerCase()));
   
@@ -518,11 +524,15 @@ function CollectionsView({ collections, onAdd }: { collections: ClientCollection
   );
 }
 
-function AddCollectionModal({ onClose, user }: { onClose: () => void, user: any }) {
+function AddCollectionModal({ onClose, user }: { onClose: () => void, user: any, key?: React.Key }) {
   const [clientName, setClientName] = useState('');
   const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'online'>('online');
   const [notes, setNotes] = useState('');
+
+  const { isListening, isSupported, toggleListening } = useSpeechToText((text) => {
+    setNotes(prev => (prev + ' ' + text).trim());
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -581,7 +591,21 @@ function AddCollectionModal({ onClose, user }: { onClose: () => void, user: any 
         <form onSubmit={handleSubmit} className="space-y-6">
           <Input label="Client Name" placeholder="e.g. Villa Project - A1" value={clientName} onChange={setClientName} />
           <Input label="Collected Amount (₹)" type="number" placeholder="0.00" value={amount} onChange={setAmount} />
-          <Input label="Notes" placeholder="Advance, final etc." value={notes} onChange={setNotes} />
+          <Input 
+            label="Notes" 
+            placeholder="Advance, final etc." 
+            value={notes} 
+            onChange={setNotes} 
+            rightElement={isSupported && (
+              <button 
+                type="button" 
+                onClick={() => toggleListening('pa-IN')}
+                className={cn("p-2 rounded-xl transition-all shadow-sm flex items-center justify-center", isListening ? "bg-red-100 text-red-500 animate-pulse" : "bg-amber-50 text-amber-900/50 hover:bg-amber-100")}
+              >
+                {isListening ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+              </button>
+            )}
+          />
           
           <button type="submit" className="w-full bg-amber-950 text-white py-5 rounded-[2rem] font-black uppercase tracking-[0.2em] text-xs shadow-2xl shadow-amber-950/30 active:scale-95 transition-all mt-4">
             Record Collection
@@ -592,7 +616,7 @@ function AddCollectionModal({ onClose, user }: { onClose: () => void, user: any 
   );
 }
 
-function WorkersView({ workers, onAddWorker, onSelectWorker }: { workers: Artisan[], onAddWorker: () => void, onSelectWorker: (id: string) => void }) {
+function WorkersView({ workers, onAddWorker, onSelectWorker }: { workers: Artisan[], onAddWorker: () => void, onSelectWorker: (id: string) => void, key?: React.Key }) {
   const [search, setSearch] = useState('');
   const filtered = workers.filter(w => w.name.toLowerCase().includes(search.toLowerCase()));
 
@@ -660,7 +684,7 @@ function WorkersView({ workers, onAddWorker, onSelectWorker }: { workers: Artisa
   );
 }
 
-function AttendanceView({ workers, attendance, user }: { workers: Artisan[], attendance: AttendanceRecord[], user: any }) {
+function AttendanceView({ workers, attendance, user }: { workers: Artisan[], attendance: AttendanceRecord[], user: any, key?: React.Key }) {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const dateStr = format(selectedDate, 'yyyy-MM-dd');
   
@@ -766,7 +790,7 @@ function AttendanceView({ workers, attendance, user }: { workers: Artisan[], att
   );
 }
 
-function ReportsView({ workers, attendance, payments }: { workers: Artisan[], attendance: AttendanceRecord[], payments: Payment[] }) {
+function ReportsView({ workers, attendance, payments }: { workers: Artisan[], attendance: AttendanceRecord[], payments: Payment[], key?: React.Key }) {
   const [reportMonth, setReportMonth] = useState(format(new Date(), 'yyyy-MM'));
 
   const reports = useMemo(() => {
@@ -868,7 +892,7 @@ function ReportsView({ workers, attendance, payments }: { workers: Artisan[], at
 
 // --- Overlays ---
 
-function AddWorkerModal({ onClose, user }: { onClose: () => void, user: any }) {
+function AddWorkerModal({ onClose, user }: { onClose: () => void, user: any, key?: React.Key }) {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [salary, setSalary] = useState('');
@@ -919,7 +943,7 @@ function AddWorkerModal({ onClose, user }: { onClose: () => void, user: any }) {
   );
 }
 
-function WorkerDetailModal({ worker, attendance, payments, onClose, onAddPayment, user }: { worker: Artisan, attendance: AttendanceRecord[], payments: Payment[], onClose: () => void, onAddPayment: () => void, user: any }) {
+function WorkerDetailModal({ worker, attendance, payments, onClose, onAddPayment, user }: { worker: Artisan, attendance: AttendanceRecord[], payments: Payment[], onClose: () => void, onAddPayment: () => void, user: any, key?: React.Key }) {
   return (
     <motion.div 
       initial={{ x: "100%" }}
@@ -937,7 +961,7 @@ function WorkerDetailModal({ worker, attendance, payments, onClose, onAddPayment
          </div>
       </header>
       
-      <div className="flex-1 overflow-y-auto px-6 pb-12 space-y-10">
+      <div className="flex-1 overflow-y-auto px-6 pb-12 space-y-10 scrollbar-hide">
         <div className="text-center py-10">
           <div className="w-28 h-28 bg-amber-100 rounded-[2.5rem] flex items-center justify-center font-serif text-5xl font-black text-amber-900 mx-auto mb-6 border-8 border-white shadow-2xl rotate-3">
             {worker.name[0]}
@@ -1013,7 +1037,7 @@ function WorkerDetailModal({ worker, attendance, payments, onClose, onAddPayment
             <h4 className="font-serif font-black text-amber-950">Attendance Matrix</h4>
             <p className="text-[8px] font-bold text-amber-400 uppercase tracking-widest">Last 10 sessions</p>
           </div>
-          <div className="flex gap-2.5 p-4 bg-white border border-amber-50 rounded- [2.5rem] overflow-x-auto scrollbar-hide">
+          <div className="flex gap-2.5 p-4 bg-white border border-amber-50 rounded-[2.5rem] overflow-x-auto scrollbar-hide">
             {[...Array(10)].map((_, i) => {
               const dateObj = new Date();
               dateObj.setDate(dateObj.getDate() - (9 - i));
@@ -1040,11 +1064,15 @@ function WorkerDetailModal({ worker, attendance, payments, onClose, onAddPayment
   );
 }
 
-function AddPaymentModal({ worker, onClose, user }: { worker: Artisan, onClose: () => void, user: any }) {
+function AddPaymentModal({ worker, onClose, user }: { worker: Artisan, onClose: () => void, user: any, key?: React.Key }) {
   const [amount, setAmount] = useState('');
   const [type, setType] = useState<'advance' | 'deduction'>('advance');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'online'>('cash');
   const [notes, setNotes] = useState('');
+
+  const { isListening, isSupported, toggleListening } = useSpeechToText((text) => {
+    setNotes(prev => (prev + ' ' + text).trim());
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1148,7 +1176,15 @@ function AddPaymentModal({ worker, onClose, user }: { worker: Artisan, onClose: 
              onChange={setAmount} 
              autoFocus 
           />
-          <Input label="Reason / Notes" placeholder={type === 'advance' ? 'Personal use, travel...' : 'Fine, damage compensation...'} value={notes} onChange={setNotes} />
+          <Input label="Reason / Notes" placeholder={type === 'advance' ? 'Personal use, travel...' : 'Fine, damage compensation...'} value={notes} onChange={setNotes} rightElement={isSupported && (
+              <button 
+                type="button" 
+                onClick={() => toggleListening('pa-IN')}
+                className={cn("p-2 rounded-xl transition-all shadow-sm flex items-center justify-center", isListening ? "bg-red-100 text-red-500 animate-pulse" : "bg-amber-50 text-amber-900/50 hover:bg-amber-100")}
+              >
+                {isListening ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+              </button>
+            )} />
           <div className="flex gap-3 pt-2">
              <button type="button" onClick={onClose} className="flex-1 bg-amber-50 text-amber-950 py-5 rounded-3xl font-black uppercase tracking-widest text-[10px]">Back</button>
              <button type="submit" className="flex-1 bg-amber-950 text-white py-5 rounded-3xl font-black uppercase tracking-widest text-[10px] shadow-xl shadow-amber-950/20">Finalize</button>
@@ -1161,18 +1197,28 @@ function AddPaymentModal({ worker, onClose, user }: { worker: Artisan, onClose: 
 
 // --- UI Primitives ---
 
-function Input({ label, value, onChange, placeholder, type = "text", autoFocus = false }: any) {
+function Input({ label, value, onChange, placeholder, type = "text", autoFocus = false, rightElement }: any) {
   return (
     <div className="space-y-2 flex-1 group">
       <label className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-900 opacity-30 ml-2 group-focus-within:opacity-100 transition-opacity">{label}</label>
-      <input 
-        type={type}
-        autoFocus={autoFocus}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full bg-white border border-amber-100 rounded-[1.5rem] p-5 text-sm font-bold text-amber-950 placeholder:text-amber-200 focus:outline-none focus:ring-4 focus:ring-amber-50 focus:border-amber-900/20 transition-all shadow-sm"
-      />
+      <div className="relative">
+        <input 
+          type={type}
+          autoFocus={autoFocus}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className={cn(
+            "w-full bg-white border border-amber-100 rounded-[1.5rem] p-5 text-sm font-bold text-amber-950 placeholder:text-amber-200 focus:outline-none focus:ring-4 focus:ring-amber-50 focus:border-amber-900/20 transition-all shadow-sm",
+            rightElement ? "pr-14" : ""
+          )}
+        />
+        {rightElement && (
+          <div className="absolute right-2 top-1/2 -translate-y-1/2">
+            {rightElement}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
