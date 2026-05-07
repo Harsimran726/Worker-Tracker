@@ -43,25 +43,43 @@
       },
       "required": ["workerId", "date", "amount", "type", "ownerId"]
     },
-    "ClientCollection": {
-      "title": "Client Collection",
-      "description": "Record of amount collected from a client",
+    "Client": {
+      "title": "Client",
+      "description": "Details of a client",
       "type": "object",
       "properties": {
-        "clientName": { "type": "string", "description": "Name of the client" },
-        "amount": { "type": "number", "description": "Amount collected" },
-        "date": { "type": "string", "format": "date-time", "description": "When the amount was collected" },
+        "name": { "type": "string", "description": "Full name of the client" },
+        "phone": { "type": "string", "description": "Contact phone number" },
+        "address": { "type": "string", "description": "Address of the project" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the client was added" },
+        "ownerId": { "type": "string", "description": "UID of the user who manages this client" }
+      },
+      "required": ["name", "ownerId"]
+    },
+    "ClientTransaction": {
+      "title": "Client Transaction",
+      "description": "Record of amount collected from or billed to a client",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string", "description": "ID of the client" },
+        "amount": { "type": "number", "description": "Amount transacted" },
+        "type": { "type": "string", "enum": ["received", "billed"], "description": "Type of transaction" },
+        "date": { "type": "string", "format": "date-time", "description": "When the amount was transacted" },
         "paymentMethod": { "type": "string", "enum": ["cash", "online"], "description": "Method of collection" },
         "notes": { "type": "string", "description": "Optional notes" },
         "ownerId": { "type": "string", "description": "UID of the user who recorded this" }
       },
-      "required": ["clientName", "amount", "date", "paymentMethod", "ownerId"]
+      "required": ["clientId", "amount", "date", "type", "paymentMethod", "ownerId"]
     }
   },
   "firestore": {
     "workers": {
       "schema": "Worker",
       "description": "Collection of workers managed by users"
+    },
+    "clients": {
+      "schema": "Client",
+      "description": "Collection of clients managed by users"
     },
     "attendance": {
       "schema": "Attendance",
@@ -71,9 +89,9 @@
       "schema": "Payment",
       "description": "Historical payment and advance records"
     },
-    "client_collections": {
-      "schema": "ClientCollection",
-      "description": "Records of amounts collected from clients"
+    "client_transactions": {
+      "schema": "ClientTransaction",
+      "description": "Records of amounts transacted with clients"
     }
   }
 }

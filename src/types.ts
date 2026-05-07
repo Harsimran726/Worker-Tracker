@@ -34,10 +34,20 @@ export interface Payment {
   ownerId: string;
 }
 
-export interface ClientCollection {
+export interface Client {
   id: string;
-  clientName: string;
+  name: string;
+  phone?: string;
+  address?: string;
+  createdAt: string;
+  ownerId: string;
+}
+
+export interface ClientTransaction {
+  id: string;
+  clientId: string;
   amount: number;
+  type: 'received' | 'billed';
   date: string; // ISO string
   paymentMethod: 'cash' | 'online';
   notes?: string;

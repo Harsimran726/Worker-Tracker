@@ -72,23 +72,43 @@ service cloud.firestore {
         && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['amount', 'type', 'notes', 'date']));
       allow delete: if isOwner(resource.data);
     }
-    // Collection Validation
-    function isValidCollection(data) {
-      return data.keys().hasAll(['clientName', 'amount', 'date', 'paymentMethod', 'ownerId'])
-        && data.clientName is string && data.clientName.size() > 0 && data.clientName.size() <= 100
+    // Client Validation
+    function isValidClient(data) {
+      return data.keys().hasAll(['name', 'ownerId'])
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.ownerId == request.auth.uid
+        && (data.get('phone', '') is string && data.get('phone', '').size() <= 20)
+        && (data.get('address', '') is string && data.get('address', '').size() <= 200);
+    }
+
+    match /clients/{clientId} {
+      allow get: if isOwner(resource.data);
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isEmailVerified() && isValidId(clientId) && isValidClient(request.resource.data);
+      allow update: if isSignedIn() && isOwner(resource.data) && isValidClient(request.resource.data)
+        && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'phone', 'address']));
+      allow delete: if isOwner(resource.data);
+    }
+
+    // Client Transaction Validation
+    function isValidClientTransaction(data) {
+      return data.keys().hasAll(['clientId', 'amount', 'date', 'type', 'paymentMethod', 'ownerId'])
+        && data.clientId is string && data.clientId.size() <= 128
         && data.amount is number && data.amount >= 0
+        && data.type in ['received', 'billed']
         && data.date is string && data.date.size() <= 50
         && data.paymentMethod in ['cash', 'online']
         && data.ownerId == request.auth.uid
         && (data.get('notes', '') is string && data.get('notes', '').size() <= 500);
     }
 
-    match /client_collections/{colId} {
+    match /client_transactions/{txId} {
       allow get: if isOwner(resource.data);
       allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
-      allow create: if isSignedIn() && isEmailVerified() && isValidId(colId) && isValidCollection(request.resource.data);
-      allow update: if isSignedIn() && isOwner(resource.data) && isValidCollection(request.resource.data)
-        && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['clientName', 'amount', 'date', 'paymentMethod', 'notes']));
+      allow create: if isSignedIn() && isEmailVerified() && isValidId(txId) && isValidClientTransaction(request.resource.data)
+        && exists(/databases/$(database)/documents/clients/$(request.resource.data.clientId));
+      allow update: if isSignedIn() && isOwner(resource.data) && isValidClientTransaction(request.resource.data)
+        && (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['amount', 'date', 'type', 'paymentMethod', 'notes']));
       allow delete: if isOwner(resource.data);
     }
   }

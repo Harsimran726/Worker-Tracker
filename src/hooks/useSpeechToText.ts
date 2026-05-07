@@ -8,16 +8,13 @@ declare global {
   }
 }
 
-export function useSpeechToText(onResult: (text: string) => void) {
+export function useSpeechToText() {
   const [isListening, setIsListening] = useState(false);
   const [isSupported, setIsSupported] = useState(false);
-  const [recognition, setRecognition] = useState<any>(null);
-
-  const savedOnResult = useRef(onResult);
-
-  useEffect(() => {
-    savedOnResult.current = onResult;
-  }, [onResult]);
+  const [transcript, setTranscript] = useState('');
+  const [interimTranscript, setInterimTranscript] = useState('');
+  
+  const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -25,55 +22,71 @@ export function useSpeechToText(onResult: (text: string) => void) {
       setIsSupported(true);
       const recognizer = new SpeechRecognition();
       recognizer.continuous = true;
-      // We can use 'pa-IN' for Punjabi. Or 'en-IN'. 
-      // Setting to pa-IN will capture Punjabi.
-      // recognizer.lang = 'pa-IN';
       recognizer.interimResults = true;
 
       recognizer.onresult = (event: any) => {
-        let finalTranscript = '';
+        let currentInterim = '';
+        let currentFinal = '';
+
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript + ' ';
+            currentFinal += event.results[i][0].transcript + ' ';
+          } else {
+            currentInterim += event.results[i][0].transcript;
           }
         }
-        if (finalTranscript) {
-          savedOnResult.current(finalTranscript);
+        
+        if (currentFinal) {
+          setTranscript(prev => prev + currentFinal);
         }
+        setInterimTranscript(currentInterim);
       };
 
       recognizer.onerror = (event: any) => {
-        console.error('Speech recognition error', event.error);
+        if (event.error !== 'no-speech') {
+          console.error('Speech recognition error:', event.error);
+        }
         if (event.error === 'not-allowed') {
           setIsSupported(false);
         }
-        setIsListening(false);
       };
 
       recognizer.onend = () => {
         setIsListening(false);
+        setInterimTranscript('');
       };
 
-      setRecognition(recognizer);
+      recognitionRef.current = recognizer;
     }
+    
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
   }, []);
 
   const toggleListening = useCallback((lang: 'en-IN' | 'pa-IN' = 'pa-IN') => {
-    if (!recognition) return;
+    if (!recognitionRef.current) return;
 
     if (isListening) {
-      recognition.stop();
+      recognitionRef.current.stop();
       setIsListening(false);
     } else {
-      recognition.lang = lang;
+      recognitionRef.current.lang = lang;
       try {
-        recognition.start();
+        recognitionRef.current.start();
         setIsListening(true);
       } catch (e) {
         console.error(e);
       }
     }
-  }, [recognition, isListening]);
+  }, [isListening]);
 
-  return { isListening, isSupported, toggleListening };
+  const resetTranscript = useCallback(() => {
+    setTranscript('');
+    setInterimTranscript('');
+  }, []);
+
+  return { isListening, isSupported, toggleListening, transcript, interimTranscript, resetTranscript, setTranscript };
 }

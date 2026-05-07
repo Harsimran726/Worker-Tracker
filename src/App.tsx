@@ -36,29 +36,33 @@ import {
   onSnapshot, 
   addDoc, 
   updateDoc, 
+  deleteDoc,
   doc, 
   serverTimestamp
 } from 'firebase/firestore';
 import { db } from './lib/firebase';
 import { useFirebase } from './hooks/useFirebase';
 import { useSpeechToText } from './hooks/useSpeechToText';
-import { Artisan, AttendanceRecord, Payment, AttendanceStatus, ClientCollection } from './types';
+import { Artisan, AttendanceRecord, Payment, AttendanceStatus, Client, ClientTransaction } from './types';
 import { cn, handleFirestoreError, OperationType } from './lib/utils';
 
 export default function App() {
   const { user, loading, login, logout, error } = useFirebase();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'workers' | 'attendance' | 'reports' | 'collections'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'workers' | 'attendance' | 'reports' | 'clients'>('dashboard');
   const [workers, setWorkers] = useState<Artisan[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
-  const [clientCollections, setClientCollections] = useState<ClientCollection[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [clientTransactions, setClientTransactions] = useState<ClientTransaction[]>([]);
   
   // Modals/Views
   const [showAddWorker, setShowAddWorker] = useState(false);
   const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null);
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [showAboutUs, setShowAboutUs] = useState(false);
-  const [showAddCollection, setShowAddCollection] = useState(false);
+  const [showAddClient, setShowAddClient] = useState(false);
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [showAddTransaction, setShowAddTransaction] = useState(false);
 
   // Sync Data
   useEffect(() => {
@@ -79,16 +83,22 @@ export default function App() {
       setPayments(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Payment)));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'payments'));
 
-    const collectionsQuery = query(collection(db, 'client_collections'), where('ownerId', '==', user.uid));
-    const unsubCollections = onSnapshot(collectionsQuery, (snapshot) => {
-      setClientCollections(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ClientCollection)));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'client_collections'));
+    const clientsQuery = query(collection(db, 'clients'), where('ownerId', '==', user.uid));
+    const unsubClients = onSnapshot(clientsQuery, (snapshot) => {
+      setClients(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Client)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'clients'));
+
+    const transactionsQuery = query(collection(db, 'client_transactions'), where('ownerId', '==', user.uid));
+    const unsubTransactions = onSnapshot(transactionsQuery, (snapshot) => {
+      setClientTransactions(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ClientTransaction)));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'client_transactions'));
 
     return () => {
       unsubWorkers();
       unsubAttendance();
       unsubPayments();
-      unsubCollections();
+      unsubClients();
+      unsubTransactions();
     };
   }, [user]);
 
@@ -110,6 +120,7 @@ export default function App() {
   }
 
   const selectedWorker = workers.find(w => w.id === selectedWorkerId);
+  const selectedClient = clients.find(c => c.id === selectedClientId);
 
   return (
     <div className="h-screen flex flex-col bg-[#FDFCF9] text-[#2D241E] max-w-md mx-auto relative overflow-hidden font-sans shadow-2xl border-x border-amber-50">
@@ -135,7 +146,7 @@ export default function App() {
       <main className="flex-1 overflow-y-auto pb-24 px-6 pt-6 scroll-smooth scrollbar-hide">
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' && (
-            <DashboardView key="dashboard" workers={workers} attendance={attendance} payments={payments} collections={clientCollections} setActiveTab={setActiveTab} />
+            <DashboardView key="dashboard" workers={workers} attendance={attendance} payments={payments} clients={clients} clientTransactions={clientTransactions} setActiveTab={setActiveTab} />
           )}
           {activeTab === 'workers' && (
             <WorkersView 
@@ -151,8 +162,14 @@ export default function App() {
           {activeTab === 'reports' && (
             <ReportsView key="reports" workers={workers} attendance={attendance} payments={payments} />
           )}
-          {activeTab === 'collections' && (
-            <CollectionsView key="collections" collections={clientCollections} onAdd={() => setShowAddCollection(true)} />
+          {activeTab === 'clients' && (
+            <ClientsView 
+              key="clients" 
+              clients={clients} 
+              transactions={clientTransactions}
+              onAddClient={() => setShowAddClient(true)} 
+              onSelectClient={setSelectedClientId}
+            />
           )}
         </AnimatePresence>
       </main>
@@ -161,7 +178,7 @@ export default function App() {
       <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/80 backdrop-blur-md border-t border-amber-100 px-4 py-4 flex justify-between items-center z-40">
         <NavButton active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<BarChart3 />} label="Home" />
         <NavButton active={activeTab === 'workers'} onClick={() => setActiveTab('workers')} icon={<Users />} label="Workers" />
-        <NavButton active={activeTab === 'collections'} onClick={() => setActiveTab('collections')} icon={<Banknote />} label="Collect" />
+        <NavButton active={activeTab === 'clients'} onClick={() => setActiveTab('clients')} icon={<Banknote />} label="Clients" />
         <NavButton active={activeTab === 'attendance'} onClick={() => setActiveTab('attendance')} icon={<Calendar />} label="Attendance" />
         <NavButton active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} icon={<Wallet />} label="Payroll" />
       </nav>
@@ -193,8 +210,25 @@ export default function App() {
         {showAboutUs && (
           <AboutUsModal key="about-us" onClose={() => setShowAboutUs(false)} />
         )}
-        {showAddCollection && (
-          <AddCollectionModal key="add-collection" onClose={() => setShowAddCollection(false)} user={user} />
+        {showAddClient && (
+          <AddClientModal key="add-client" onClose={() => setShowAddClient(false)} user={user} />
+        )}
+        {showAddTransaction && selectedClient && (
+          <AddClientTransactionModal 
+            key="add-tx"
+            clientId={selectedClient.id} 
+            onClose={() => setShowAddTransaction(false)} 
+            user={user} 
+          />
+        )}
+        {selectedClient && (
+          <ClientDetailModal 
+            key="client-detail"
+            client={selectedClient} 
+            transactions={clientTransactions.filter(t => t.clientId === selectedClient.id)}
+            onClose={() => setSelectedClientId(null)}
+            onAddTransaction={() => setShowAddTransaction(true)}
+          />
         )}
       </AnimatePresence>
     </div>
@@ -305,7 +339,7 @@ function NavButton({ active, onClick, icon, label }: { active: boolean, onClick:
   );
 }
 
-function DashboardView({ workers, attendance, payments, collections, setActiveTab }: { workers: Artisan[], attendance: AttendanceRecord[], payments: Payment[], collections: ClientCollection[], setActiveTab: any, key?: React.Key }) {
+function DashboardView({ workers, attendance, payments, clients, clientTransactions, setActiveTab }: { workers: Artisan[], attendance: AttendanceRecord[], payments: Payment[], clients: Client[], clientTransactions: ClientTransaction[], setActiveTab: any, key?: React.Key }) {
   const activeWorkers = workers.filter(w => w.status === 'active').length;
   
   const todayStr = format(new Date(), 'yyyy-MM-dd');
@@ -316,7 +350,7 @@ function DashboardView({ workers, attendance, payments, collections, setActiveTa
   const thisMonthPayments = payments.filter(p => p.date.startsWith(currentMonth));
   const totalAdvances = thisMonthPayments.filter(p => p.type === 'advance').reduce((acc, p) => acc + p.amount, 0);
 
-  const totalCollected = collections.reduce((acc, c) => acc + c.amount, 0);
+  const totalCollected = clientTransactions.filter(t => t.type === 'received').reduce((acc, c) => acc + c.amount, 0);
 
   return (
     <motion.div 
@@ -350,7 +384,7 @@ function DashboardView({ workers, attendance, payments, collections, setActiveTa
             <div className="flex gap-8">
                <div>
                  <p className="text-[8px] font-black uppercase text-amber-200/30 mb-1">Collections</p>
-                 <h2 className="text-2xl font-serif font-black tracking-tight">₹{totalCollected.toLocaleString()}</h2>
+                 <h2 className="text-2xl font-serif font-black tracking-tight text-emerald-400">₹{totalCollected.toLocaleString()}</h2>
                </div>
                <div>
                  <p className="text-[8px] font-black uppercase text-amber-200/30 mb-1">Advances</p>
@@ -373,11 +407,11 @@ function DashboardView({ workers, attendance, payments, collections, setActiveTa
         <h3 className="text-sm font-black text-amber-950/30 uppercase tracking-[0.2em] mb-4 ml-2 italic">Management Core</h3>
         <div className="grid grid-cols-1 gap-3">
           <QuickAction 
-            onClick={() => setActiveTab('collections')}
+            onClick={() => setActiveTab('clients')}
             icon={<Banknote className="text-amber-900" />} 
-            label="Client Collection" 
-            sub="Record new client income" 
-            bgColor="bg-green-50/50"
+            label="Client Management" 
+            sub="Track client billing & received amounts" 
+            bgColor="bg-emerald-50/50"
           />
           <QuickAction 
             onClick={() => setActiveTab('attendance')}
@@ -438,13 +472,12 @@ function QuickAction({ icon, label, sub, bgColor, onClick }: { icon: React.React
   );
 }
 
-function CollectionsView({ collections, onAdd }: { collections: ClientCollection[], onAdd: () => void, key?: React.Key }) {
+function ClientsView({ clients, transactions, onAddClient, onSelectClient }: { clients: Client[], transactions: ClientTransaction[], onAddClient: () => void, onSelectClient: (id: string) => void, key?: React.Key }) {
   const [search, setSearch] = useState('');
-  const filtered = collections.filter(c => c.clientName.toLowerCase().includes(search.toLowerCase()));
+  const filtered = clients.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
   
-  const totalCollected = collections.reduce((acc, c) => acc + c.amount, 0);
-  const onlineTotal = collections.filter(c => c.paymentMethod === 'online').reduce((acc, c) => acc + c.amount, 0);
-  const cashTotal = collections.filter(c => c.paymentMethod === 'cash').reduce((acc, c) => acc + c.amount, 0);
+  const totalReceived = transactions.filter(t => t.type === 'received').reduce((acc, c) => acc + c.amount, 0);
+  const totalBilled = transactions.filter(t => t.type === 'billed').reduce((acc, c) => acc + c.amount, 0);
 
   return (
     <motion.div 
@@ -454,29 +487,25 @@ function CollectionsView({ collections, onAdd }: { collections: ClientCollection
     >
       <div className="flex justify-between items-end mb-2">
         <div>
-          <h2 className="text-3xl font-serif font-black text-amber-950">Client Ledger</h2>
-          <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest mt-1">Income Tracker</p>
+          <h2 className="text-3xl font-serif font-black text-amber-950">Clients</h2>
+          <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest mt-1">Manage & Track</p>
         </div>
         <button 
-          onClick={onAdd}
+          onClick={onAddClient}
           className="w-12 h-12 bg-amber-950 text-white rounded-2xl shadow-xl shadow-amber-950/20 flex items-center justify-center active:scale-90 transition-transform"
         >
           <Plus className="w-6 h-6" />
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
-         <div className="bg-white p-3 rounded-2xl border border-amber-50 shadow-sm text-center">
-            <p className="text-[7px] font-black uppercase text-amber-900/40 mb-1">Total</p>
-            <p className="text-sm font-black text-amber-950">₹{totalCollected.toLocaleString()}</p>
+      <div className="grid grid-cols-2 gap-4">
+         <div className="bg-white p-4 rounded-3xl border border-amber-50 shadow-sm">
+            <p className="text-[8px] font-black uppercase text-amber-900/40 mb-1">Total Received</p>
+            <p className="text-xl font-serif font-black text-emerald-600">₹{totalReceived.toLocaleString()}</p>
          </div>
-         <div className="bg-amber-50 p-3 rounded-2xl border border-amber-100 shadow-sm text-center">
-            <p className="text-[7px] font-black uppercase text-amber-600 mb-1">Online</p>
-            <p className="text-sm font-black text-amber-900">₹{onlineTotal.toLocaleString()}</p>
-         </div>
-         <div className="bg-white p-3 rounded-2xl border border-amber-50 shadow-sm text-center">
-            <p className="text-[7px] font-black uppercase text-amber-900/40 mb-1">Cash</p>
-            <p className="text-sm font-black text-amber-950">₹{cashTotal.toLocaleString()}</p>
+         <div className="bg-white p-4 rounded-3xl border border-amber-50 shadow-sm">
+            <p className="text-[8px] font-black uppercase text-amber-900/40 mb-1">Total Billed</p>
+            <p className="text-xl font-serif font-black text-amber-950">₹{totalBilled.toLocaleString()}</p>
          </div>
       </div>
 
@@ -492,31 +521,41 @@ function CollectionsView({ collections, onAdd }: { collections: ClientCollection
       </div>
 
       <div className="space-y-3 pb-10">
-        {filtered.map(item => (
-          <motion.div 
-            layout
-            key={item.id}
-            className="p-5 bg-white rounded-[2rem] border border-amber-50 shadow-sm flex items-center justify-between group"
-          >
-            <div className="flex items-center gap-5">
-              <div className="w-14 h-14 rounded-2xl bg-amber-50 flex items-center justify-center text-amber-900">
-                {item.paymentMethod === 'cash' ? <Banknote className="w-6 h-6" /> : <Smartphone className="w-6 h-6" />}
+        {filtered.map(client => {
+          const clientTxs = transactions.filter(t => t.clientId === client.id);
+          const received = clientTxs.filter(t => t.type === 'received').reduce((acc, t) => acc + t.amount, 0);
+          const billed = clientTxs.filter(t => t.type === 'billed').reduce((acc, t) => acc + t.amount, 0);
+          const balance = received - billed;
+
+          return (
+            <motion.div 
+              layout
+              key={client.id}
+              onClick={() => onSelectClient(client.id)}
+              className="p-5 bg-white rounded-[2.5rem] border border-amber-50 shadow-sm flex items-center justify-between group cursor-pointer active:scale-95 transition-transform"
+            >
+              <div className="flex items-center gap-5">
+                <div className="w-14 h-14 rounded-2xl bg-amber-50 flex items-center justify-center font-serif text-2xl font-black text-amber-900 shadow-inner">
+                  {client.name[0]?.toUpperCase()}
+                </div>
+                <div>
+                  <h4 className="font-black text-sm text-amber-950">{client.name}</h4>
+                  <p className="text-[9px] font-bold text-amber-400 uppercase tracking-tighter mt-1">{client.phone || 'No phone'}</p>
+                </div>
               </div>
-              <div>
-                <h4 className="font-black text-sm text-amber-950">{item.clientName}</h4>
-                <p className="text-[9px] font-bold text-amber-400 uppercase tracking-tighter">{format(parseISO(item.date), 'MMM d, yyyy')}</p>
+              <div className="text-right flex flex-col justify-center items-end">
+                  <p className={cn("text-lg font-black", balance >= 0 ? "text-emerald-600" : "text-red-500")}>
+                    {balance >= 0 ? '+' : '-'}₹{Math.abs(balance).toLocaleString()}
+                  </p>
+                  <p className="text-[8px] font-black uppercase text-amber-900/30 line-clamp-1">{client.address || 'Balance'}</p>
               </div>
-            </div>
-            <div className="text-right">
-              <p className="font-black text-lg text-green-600">₹{item.amount.toLocaleString()}</p>
-              <p className="text-[8px] font-black uppercase text-amber-900/20">{item.paymentMethod}</p>
-            </div>
-          </motion.div>
-        ))}
+            </motion.div>
+          );
+        })}
         {filtered.length === 0 && (
            <div className="py-20 text-center opacity-20 italic">
-             <BarChart3 className="w-12 h-12 mx-auto mb-4" />
-             <p className="text-sm font-bold">No collections found</p>
+             <Users className="w-12 h-12 mx-auto mb-4" />
+             <p className="text-sm font-bold">No clients found</p>
            </div>
         )}
       </div>
@@ -524,36 +563,30 @@ function CollectionsView({ collections, onAdd }: { collections: ClientCollection
   );
 }
 
-function AddCollectionModal({ onClose, user }: { onClose: () => void, user: any, key?: React.Key }) {
-  const [clientName, setClientName] = useState('');
-  const [amount, setAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'online'>('online');
-  const [notes, setNotes] = useState('');
-
-  const { isListening, isSupported, toggleListening } = useSpeechToText((text) => {
-    setNotes(prev => (prev + ' ' + text).trim());
-  });
+function AddClientModal({ onClose, user }: { onClose: () => void, user: any, key?: React.Key }) {
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!clientName || !amount) return;
+    if (!name) return;
     try {
-      await addDoc(collection(db, 'client_collections'), {
-        clientName,
-        amount: parseFloat(amount),
-        paymentMethod,
-        notes,
-        date: new Date().toISOString(),
+      await addDoc(collection(db, 'clients'), {
+        name,
+        phone,
+        address,
+        createdAt: new Date().toISOString(),
         ownerId: user.uid
       });
       onClose();
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'client_collections');
+      handleFirestoreError(error, OperationType.CREATE, 'clients');
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-amber-950/40 backdrop-blur-md p-4">
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-amber-950/40 backdrop-blur-md p-4">
       <motion.div 
         initial={{ y: "100%" }}
         animate={{ y: 0 }}
@@ -561,41 +594,121 @@ function AddCollectionModal({ onClose, user }: { onClose: () => void, user: any,
         className="w-full max-w-md bg-[#FDFCF9] rounded-[3rem] p-8 pb-12 shadow-2xl relative"
       >
         <button onClick={onClose} className="absolute right-8 top-8 text-amber-900/40 p-2 hover:bg-amber-50 rounded-full transition-colors"><XCircle /></button>
-        <h2 className="text-3xl font-serif font-black text-amber-950 mb-8 pr-12 leading-tight">Client Collection</h2>
+        <h2 className="text-3xl font-serif font-black text-amber-950 mb-8 pr-12 leading-tight">Add Client</h2>
         
-        <div className="flex gap-2 mb-6 p-1 bg-amber-50 rounded-2xl">
-            <button 
-              type="button"
-              onClick={() => setPaymentMethod('cash')}
-              className={cn(
-                "flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2",
-                paymentMethod === 'cash' ? "bg-white text-amber-900 shadow-sm" : "text-amber-900/40"
-              )}
-            >
-              <Banknote className="w-3 h-3" />
-              Cash
-            </button>
-            <button 
-              type="button"
-              onClick={() => setPaymentMethod('online')}
-              className={cn(
-                "flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2",
-                paymentMethod === 'online' ? "bg-white text-amber-900 shadow-sm" : "text-amber-900/40"
-              )}
-            >
-              <Smartphone className="w-3 h-3" />
-              Online
-            </button>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <Input label="Client Name" value={name} onChange={setName} autoFocus placeholder="e.g. Sunny" />
+          <Input label="Phone Number" value={phone} onChange={setPhone} type="tel" placeholder="1234567890" />
+          <Input label="Address / Details" value={address} onChange={setAddress} placeholder="Villa project..." />
+          
+          <button type="submit" className="w-full bg-amber-950 text-white py-5 rounded-[2rem] font-black uppercase tracking-[0.2em] text-xs shadow-2xl shadow-amber-950/30 active:scale-95 transition-all mt-4">
+            Save Client
+          </button>
+        </form>
+      </motion.div>
+    </div>
+  );
+}
+
+function AddClientTransactionModal({ clientId, onClose, user }: { clientId: string, onClose: () => void, user: any, key?: React.Key }) {
+  const [amount, setAmount] = useState('');
+  const [type, setType] = useState<'received' | 'billed'>('received');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'online'>('online');
+  const { isListening, isSupported, toggleListening, transcript, interimTranscript, setTranscript } = useSpeechToText();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!amount) return;
+    try {
+      await addDoc(collection(db, 'client_transactions'), {
+        clientId,
+        amount: parseFloat(amount),
+        type,
+        paymentMethod,
+        notes: transcript,
+        date: new Date().toISOString(),
+        ownerId: user.uid
+      });
+      onClose();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'client_transactions');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-amber-950/40 backdrop-blur-md p-4">
+      <motion.div 
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
+        className="w-full max-w-md bg-[#FDFCF9] rounded-[3rem] p-8 pb-12 shadow-2xl relative"
+      >
+        <button onClick={onClose} className="absolute right-8 top-8 text-amber-900/40 p-2 hover:bg-amber-50 rounded-full transition-colors z-20"><XCircle /></button>
+        <h2 className="text-3xl font-serif font-black text-amber-950 mb-1 pr-12 leading-tight">New Entry</h2>
+        <p className="text-[10px] font-black uppercase text-amber-900/40 tracking-widest mb-8">Record transaction</p>
+        
+        <div className="flex bg-amber-50 rounded-2xl p-1 mb-8 relative">
+          <motion.div 
+            className="absolute top-1 bottom-1 w-[calc(50%-4px)] bg-white rounded-xl shadow-md"
+            animate={{ left: type === 'received' ? 4 : 'calc(50%)' }}
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+          />
+          <button 
+            type="button"
+            onClick={() => setType('received')}
+            className={cn(
+              "flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-colors gap-2 flex items-center justify-center relative z-10",
+              type === 'received' ? "text-emerald-600" : "text-amber-900/40"
+            )}
+          >
+            <TrendingUp className="w-4 h-4" /> Received
+          </button>
+          <button 
+            type="button"
+            onClick={() => setType('billed')}
+            className={cn(
+              "flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-colors gap-2 flex items-center justify-center relative z-10",
+              type === 'billed' ? "text-amber-950" : "text-amber-900/40"
+            )}
+          >
+            <TrendingDown className="w-4 h-4" /> Billed
+          </button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          <Input label="Client Name" placeholder="e.g. Villa Project - A1" value={clientName} onChange={setClientName} />
-          <Input label="Collected Amount (₹)" type="number" placeholder="0.00" value={amount} onChange={setAmount} />
+          <Input label={`${type === 'received' ? 'Received' : 'Billed'} Amount (₹)`} type="number" value={amount} onChange={setAmount} autoFocus placeholder="0.00" />
+          
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase text-amber-900/40 tracking-widest px-4">Payment Method</label>
+            <div className="flex gap-2">
+              <button 
+                type="button"
+                onClick={() => setPaymentMethod('cash')}
+                className={cn(
+                  "flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex flex-col items-center justify-center gap-2 border-2",
+                  paymentMethod === 'cash' ? "bg-amber-50 border-amber-900 text-amber-900" : "bg-white border-amber-50 text-amber-900/40 hover:bg-amber-50/50"
+                )}
+              >
+                <Banknote className="w-5 h-5" /> Cash
+              </button>
+              <button 
+                type="button"
+                onClick={() => setPaymentMethod('online')}
+                className={cn(
+                  "flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex flex-col items-center justify-center gap-2 border-2",
+                  paymentMethod === 'online' ? "bg-amber-50 border-amber-900 text-amber-900" : "bg-white border-amber-50 text-amber-900/40 hover:bg-amber-50/50"
+                )}
+              >
+                <Smartphone className="w-5 h-5" /> Online
+              </button>
+            </div>
+          </div>
+
           <Input 
             label="Notes" 
-            placeholder="Advance, final etc." 
-            value={notes} 
-            onChange={setNotes} 
+            placeholder="Timber, Advance, Site etc." 
+            value={transcript + (interimTranscript ? (transcript ? ' ' : '') + interimTranscript : '')} 
+            onChange={setTranscript} 
             rightElement={isSupported && (
               <button 
                 type="button" 
@@ -604,15 +717,134 @@ function AddCollectionModal({ onClose, user }: { onClose: () => void, user: any,
               >
                 {isListening ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
               </button>
-            )}
+            )} 
           />
           
           <button type="submit" className="w-full bg-amber-950 text-white py-5 rounded-[2rem] font-black uppercase tracking-[0.2em] text-xs shadow-2xl shadow-amber-950/30 active:scale-95 transition-all mt-4">
-            Record Collection
+            Record Transaction 
           </button>
         </form>
       </motion.div>
     </div>
+  );
+}
+
+function ClientDetailModal({ client, transactions, onClose, onAddTransaction }: { client: Client, transactions: ClientTransaction[], onClose: () => void, onAddTransaction: () => void, key?: React.Key }) {
+  if (!client) return null;
+  const received = transactions.filter(t => t.type === 'received').reduce((acc, t) => acc + t.amount, 0);
+  const billed = transactions.filter(t => t.type === 'billed').reduce((acc, t) => acc + t.amount, 0);
+  const balance = received - billed;
+
+  const handleDeleteClient = async () => {
+    try {
+      await deleteDoc(doc(db, 'clients', client.id));
+      onClose();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `clients/${client.id}`);
+    }
+  };
+
+  const handleDeleteTransaction = async (txId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await deleteDoc(doc(db, 'client_transactions', txId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `client_transactions/${txId}`);
+    }
+  };
+
+  return (
+    <motion.div 
+      initial={{ x: "100%" }}
+      animate={{ x: 0 }}
+      exit={{ x: "100%" }}
+      transition={{ type: "spring", damping: 25, stiffness: 200 }}
+      className="fixed inset-0 z-50 bg-[#FDFCF9] flex flex-col"
+    >
+      <header className="flex items-center justify-between p-6">
+         <button onClick={onClose} className="w-12 h-12 bg-white border border-amber-50 rounded-2xl flex items-center justify-center text-amber-950 shadow-sm active:scale-95 transition-transform">
+           <ChevronRight className="w-6 h-6 rotate-180" />
+         </button>
+         <div className="flex gap-2">
+           <button onClick={handleDeleteClient} className="w-12 h-12 bg-red-50 border border-red-100 rounded-2xl flex items-center justify-center text-red-600 shadow-sm active:scale-95 transition-transform hover:bg-red-100">
+             <XCircle className="w-5 h-5" />
+           </button>
+           <button onClick={onAddTransaction} className="w-12 h-12 bg-amber-950 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-amber-950/20 active:scale-95 transition-transform">
+             <Plus className="w-6 h-6" />
+           </button>
+         </div>
+      </header>
+      
+      <div className="flex-1 overflow-y-auto px-6 pb-12 space-y-10 scrollbar-hide">
+        <div className="text-center py-10">
+          <div className="w-28 h-28 bg-amber-100 rounded-[2.5rem] flex items-center justify-center font-serif text-5xl font-black text-amber-900 mx-auto mb-6 border-8 border-white shadow-2xl rotate-3">
+            {client.name[0]?.toUpperCase()}
+          </div>
+          <h2 className="text-3xl font-serif font-black text-amber-950">{client.name}</h2>
+          <p className="text-sm font-medium text-amber-600 mt-2">{client.phone || 'No Phone'}</p>
+          <p className="text-sm font-medium text-amber-400 mt-1">{client.address || 'No Address'}</p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+           <div className="bg-white p-6 rounded-[2rem] border border-amber-50 shadow-sm text-center">
+              <p className="text-[9px] font-black uppercase text-amber-900/40 mb-2">Total Received</p>
+              <p className="font-serif text-xl font-black text-emerald-600">₹{received.toLocaleString()}</p>
+           </div>
+           <div className="bg-white p-6 rounded-[2rem] border border-amber-50 shadow-sm text-center">
+              <p className="text-[9px] font-black uppercase text-amber-900/40 mb-2">Total Billed</p>
+              <p className="font-serif text-xl font-black text-amber-950">₹{billed.toLocaleString()}</p>
+           </div>
+        </div>
+        
+        <div className="bg-amber-950 text-white p-6 py-8 rounded-[2rem] shadow-2xl shadow-amber-950/20 text-center">
+          <p className="text-[9px] font-black uppercase text-amber-200/50 tracking-widest mb-2">Current Balance</p>
+          <p className={cn("font-serif text-4xl font-black", balance >= 0 ? "text-emerald-400" : "text-white")}>
+            {balance >= 0 ? '+' : '-'}₹{Math.abs(balance).toLocaleString()}
+          </p>
+          <p className="text-[10px] font-medium text-amber-200/50 mt-4 max-w-xs mx-auto">
+             {balance >= 0 ? "Amount received exceeds or matches billed amount." : "Amount billed exceeds received amount (Pending)."}
+          </p>
+        </div>
+
+        <div className="space-y-6">
+          <div className="flex items-end justify-between">
+            <h4 className="font-serif font-black text-amber-950 text-xl">Transactions</h4>
+            <p className="text-[8px] font-bold text-amber-400 uppercase tracking-widest">{transactions.length} Records</p>
+          </div>
+          <div className="space-y-4">
+            {transactions.slice().sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(t => (
+              <div key={t.id} className="p-5 bg-white rounded-[2.5rem] border border-amber-50 shadow-sm flex items-center justify-between group">
+                <div className="flex items-center gap-4">
+                  <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center", t.type === 'received' ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-900")}>
+                    {t.type === 'received' ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+                  </div>
+                  <div>
+                    <h4 className="font-black text-sm text-amber-950 capitalize">{t.type}</h4>
+                    <p className="text-[9px] font-bold text-amber-400 uppercase tracking-tighter mt-0.5">{format(parseISO(t.date), 'MMM d, yp')}</p>
+                    {t.notes && <p className="text-xs text-amber-900/60 mt-1 line-clamp-1">{t.notes}</p>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="text-right">
+                    <p className={cn("font-black text-lg", t.type === 'received' ? "text-emerald-600" : "text-amber-950")}>₹{t.amount.toLocaleString()}</p>
+                    <p className="text-[8px] font-black uppercase text-amber-900/20">{t.paymentMethod}</p>
+                  </div>
+                  <button onClick={(e) => handleDeleteTransaction(t.id, e)} className="w-8 h-8 rounded-full ml-1 text-red-500 hover:bg-red-50 flex items-center justify-center transition-all bg-red-50/50">
+                    <XCircle className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+            {transactions.length === 0 && (
+              <div className="py-12 text-center opacity-20 italic bg-amber-50/50 rounded-3xl">
+                <Banknote className="w-8 h-8 mx-auto mb-3" />
+                <p className="text-xs font-bold">No transactions found</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 
@@ -918,7 +1150,7 @@ function AddWorkerModal({ onClose, user }: { onClose: () => void, user: any, key
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-amber-950/40 backdrop-blur-md p-4">
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-amber-950/40 backdrop-blur-md p-4">
       <motion.div 
         initial={{ y: "100%" }}
         animate={{ y: 0 }}
@@ -944,6 +1176,24 @@ function AddWorkerModal({ onClose, user }: { onClose: () => void, user: any, key
 }
 
 function WorkerDetailModal({ worker, attendance, payments, onClose, onAddPayment, user }: { worker: Artisan, attendance: AttendanceRecord[], payments: Payment[], onClose: () => void, onAddPayment: () => void, user: any, key?: React.Key }) {
+  if (!worker) return null;
+  const handleDeleteWorker = async () => {
+    try {
+      await deleteDoc(doc(db, 'workers', worker.id));
+      onClose();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `workers/${worker.id}`);
+    }
+  };
+
+  const handleDeletePayment = async (paymentId: string) => {
+    try {
+      await deleteDoc(doc(db, 'payments', paymentId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `payments/${paymentId}`);
+    }
+  };
+
   return (
     <motion.div 
       initial={{ x: "100%" }}
@@ -951,14 +1201,19 @@ function WorkerDetailModal({ worker, attendance, payments, onClose, onAddPayment
       exit={{ x: "100%" }}
       className="fixed inset-0 z-50 bg-[#FDFCF9] flex flex-col max-w-md mx-auto shadow-2xl"
     >
-      <header className="p-6 flex items-center gap-6 border-b border-amber-50 bg-white">
-         <button onClick={onClose} className="w-12 h-12 flex items-center justify-center bg-amber-50 rounded-2xl hover:bg-amber-100 transition-colors">
-           <ChevronRight className="rotate-180 text-amber-950 w-5 h-5" />
-         </button>
-         <div>
-            <h2 className="text-xl font-serif font-black text-amber-950">Service Record</h2>
-            <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest mt-0.5">Individual Archive</p>
+      <header className="p-6 flex items-center justify-between border-b border-amber-50 bg-white">
+         <div className="flex items-center gap-4">
+           <button onClick={onClose} className="w-12 h-12 flex items-center justify-center bg-amber-50 rounded-2xl hover:bg-amber-100 transition-colors">
+             <ChevronRight className="rotate-180 text-amber-950 w-5 h-5" />
+           </button>
+           <div>
+              <h2 className="text-xl font-serif font-black text-amber-950">Service Record</h2>
+              <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest mt-0.5">Individual Archive</p>
+           </div>
          </div>
+         <button onClick={handleDeleteWorker} className="w-12 h-12 flex items-center justify-center bg-red-50 text-red-600 rounded-2xl hover:bg-red-100 transition-colors">
+           <XCircle className="w-5 h-5" />
+         </button>
       </header>
       
       <div className="flex-1 overflow-y-auto px-6 pb-12 space-y-10 scrollbar-hide">
@@ -993,14 +1248,14 @@ function WorkerDetailModal({ worker, attendance, payments, onClose, onAddPayment
             </button>
           </div>
           <div className="space-y-4">
-            {payments.slice().reverse().map(p => (
+            {payments.slice().sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(p => (
               <div key={p.id} className="p-5 bg-white rounded-[2.5rem] border border-amber-50 shadow-sm flex items-center justify-between group">
-                <div className="flex items-center gap-5">
+                <div className="flex items-center gap-4">
                   <div className={cn(
-                    "w-14 h-14 rounded-[1.5rem] flex items-center justify-center transition-transform group-hover:scale-105",
-                    p.type === 'advance' ? "bg-red-50 text-red-600" : "bg-green-50 text-green-600"
+                    "w-12 h-12 rounded-[1.5rem] flex items-center justify-center transition-transform group-hover:scale-105",
+                    p.type === 'advance' ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-600"
                   )}>
-                    {p.type === 'advance' ? <TrendingDown className="w-6 h-6" /> : <TrendingUp className="w-6 h-6" />}
+                    {p.type === 'advance' ? <TrendingDown className="w-5 h-5" /> : <TrendingUp className="w-5 h-5" />}
                   </div>
                   <div>
                     <div className="flex items-center gap-2 mb-1">
@@ -1015,11 +1270,16 @@ function WorkerDetailModal({ worker, attendance, payments, onClose, onAddPayment
                     <p className="text-[10px] font-bold text-amber-400 uppercase tracking-tighter">{format(parseISO(p.date), 'MMM d, h:mm a')}</p>
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className={cn("font-black text-xl leading-none mb-1", p.type === 'advance' ? "text-red-500" : "text-green-600")}>
-                    {p.type === 'advance' ? '-' : '+'}₹{p.amount.toLocaleString()}
-                  </p>
-                  <p className="text-[8px] font-black uppercase text-amber-900/20 tracking-widest">Recorded</p>
+                <div className="flex items-center gap-2">
+                  <div className="text-right">
+                    <p className={cn("font-black text-xl leading-none mb-1", p.type === 'advance' ? "text-red-500" : "text-emerald-600")}>
+                      {p.type === 'advance' ? '-' : '+'}₹{p.amount.toLocaleString()}
+                    </p>
+                    <p className="text-[8px] font-black uppercase text-amber-900/20 tracking-widest">Recorded</p>
+                  </div>
+                  <button onClick={(e) => { e.stopPropagation(); handleDeletePayment(p.id); }} className="w-8 h-8 rounded-full ml-1 text-red-500 hover:bg-red-50 flex items-center justify-center transition-all bg-red-50/50">
+                    <XCircle className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
             ))}
@@ -1068,11 +1328,8 @@ function AddPaymentModal({ worker, onClose, user }: { worker: Artisan, onClose: 
   const [amount, setAmount] = useState('');
   const [type, setType] = useState<'advance' | 'deduction'>('advance');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'online'>('cash');
-  const [notes, setNotes] = useState('');
 
-  const { isListening, isSupported, toggleListening } = useSpeechToText((text) => {
-    setNotes(prev => (prev + ' ' + text).trim());
-  });
+  const { isListening, isSupported, toggleListening, transcript, interimTranscript, setTranscript } = useSpeechToText();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1083,7 +1340,7 @@ function AddPaymentModal({ worker, onClose, user }: { worker: Artisan, onClose: 
         amount: parseFloat(amount),
         type,
         paymentMethod,
-        notes,
+        notes: transcript,
         date: new Date().toISOString(),
         ownerId: user.uid
       });
@@ -1099,84 +1356,86 @@ function AddPaymentModal({ worker, onClose, user }: { worker: Artisan, onClose: 
         initial={{ y: "100%" }}
         animate={{ y: 0 }}
         exit={{ y: "100%" }}
-        className="w-full max-w-md bg-white rounded-[3rem] p-8 pb-12 shadow-2xl"
+        className="w-full max-w-md bg-white rounded-[3rem] p-8 pb-12 shadow-2xl relative"
       >
-        <div className="flex items-center gap-4 mb-8">
+        <button onClick={onClose} className="absolute right-8 top-8 text-amber-900/40 p-2 hover:bg-amber-50 rounded-full transition-colors z-20"><XCircle /></button>
+        <div className="flex items-center gap-4 mb-2">
            <div className={cn(
              "w-12 h-12 rounded-2xl flex items-center justify-center transition-colors",
-             type === 'advance' ? "bg-amber-50 text-amber-900" : "bg-red-50 text-red-900"
+             type === 'deduction' ? "bg-amber-50 text-amber-900" : "bg-red-50 text-red-600"
            )}>
              <Wallet className="w-6 h-6" />
            </div>
            <div>
              <h2 className="text-2xl font-serif font-black text-amber-950 leading-tight">Payment Entry</h2>
-             <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest">Adjust Worker Balance</p>
            </div>
         </div>
+        <p className="text-[10px] font-black text-amber-900/40 uppercase tracking-widest pl-16 mb-8 mt-[-20px]">Adjust Worker Balance</p>
 
-        <div className="flex gap-2 mb-6 p-1 bg-amber-50 rounded-2xl">
+        <div className="flex bg-amber-50 rounded-2xl p-1 mb-8 relative">
+          <motion.div 
+            className="absolute top-1 bottom-1 w-[calc(50%-4px)] bg-white rounded-xl shadow-md"
+            animate={{ left: type === 'advance' ? 4 : 'calc(50%)' }}
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+          />
           <button 
             type="button"
             onClick={() => setType('advance')}
             className={cn(
-              "flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-              type === 'advance' ? "bg-white text-amber-900 shadow-sm" : "text-amber-900/40"
+              "flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-colors gap-2 flex items-center justify-center relative z-10",
+              type === 'advance' ? "text-red-500" : "text-amber-900/40"
             )}
           >
-            Advance
+            <TrendingDown className="w-4 h-4" /> Advance
           </button>
           <button 
             type="button"
             onClick={() => setType('deduction')}
             className={cn(
-              "flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
-              type === 'deduction' ? "bg-white text-red-600 shadow-sm" : "text-amber-900/40"
+              "flex-1 py-3 text-[10px] font-black uppercase tracking-widest transition-colors gap-2 flex items-center justify-center relative z-10",
+              type === 'deduction' ? "text-amber-950" : "text-amber-900/40"
             )}
           >
-            Deduction
+            <TrendingUp className="w-4 h-4" /> Deposit
           </button>
         </div>
 
-        <div className="mb-6">
-          <label className="text-[10px] font-black text-amber-900/40 uppercase tracking-widest pl-4 mb-2 block">
-            Payment Method
-          </label>
-          <div className="flex gap-2 p-1 bg-amber-50 rounded-2xl">
-            <button 
-              type="button"
-              onClick={() => setPaymentMethod('cash')}
-              className={cn(
-                "flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2",
-                paymentMethod === 'cash' ? "bg-white text-amber-900 shadow-sm" : "text-amber-900/40"
-              )}
-            >
-              <Banknote className="w-3 h-3" />
-              Cash
-            </button>
-            <button 
-              type="button"
-              onClick={() => setPaymentMethod('online')}
-              className={cn(
-                "flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2",
-                paymentMethod === 'online' ? "bg-white text-amber-900 shadow-sm" : "text-amber-900/40"
-              )}
-            >
-              <Smartphone className="w-3 h-3" />
-              Online
-            </button>
-          </div>
-        </div>
-        
         <form onSubmit={handleSubmit} className="space-y-6">
           <Input 
-             label={`${type === 'advance' ? 'Advance' : 'Deduction'} Amount (₹)`} 
+             label={`${type === 'advance' ? 'Advance' : 'Deposit'} Amount (₹)`} 
              type="number" 
              placeholder="0.00" 
              value={amount} 
              onChange={setAmount} 
              autoFocus 
           />
-          <Input label="Reason / Notes" placeholder={type === 'advance' ? 'Personal use, travel...' : 'Fine, damage compensation...'} value={notes} onChange={setNotes} rightElement={isSupported && (
+          
+          <div className="space-y-2">
+            <label className="text-[10px] font-black uppercase text-amber-900/40 tracking-widest px-4">Payment Method</label>
+            <div className="flex gap-2">
+              <button 
+                type="button"
+                onClick={() => setPaymentMethod('cash')}
+                className={cn(
+                  "flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex flex-col items-center justify-center gap-2 border-2",
+                  paymentMethod === 'cash' ? "bg-amber-50 border-amber-900 text-amber-900" : "bg-white border-amber-50 text-amber-900/40 hover:bg-amber-50/50"
+                )}
+              >
+                <Banknote className="w-5 h-5" /> Cash
+              </button>
+              <button 
+                type="button"
+                onClick={() => setPaymentMethod('online')}
+                className={cn(
+                  "flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex flex-col items-center justify-center gap-2 border-2",
+                  paymentMethod === 'online' ? "bg-amber-50 border-amber-900 text-amber-900" : "bg-white border-amber-50 text-amber-900/40 hover:bg-amber-50/50"
+                )}
+              >
+                <Smartphone className="w-5 h-5" /> Online
+              </button>
+            </div>
+          </div>
+          <Input label="Reason / Notes" placeholder={type === 'advance' ? 'Personal use, travel...' : 'Fine, damage compensation...'} value={transcript + (interimTranscript ? (transcript ? ' ' : '') + interimTranscript : '')} onChange={setTranscript} rightElement={isSupported && (
               <button 
                 type="button" 
                 onClick={() => toggleListening('pa-IN')}
